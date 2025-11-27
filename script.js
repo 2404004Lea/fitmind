@@ -3,11 +3,21 @@ let currentUser = null;
 let users = JSON.parse(localStorage.getItem('users')) || [];
 let notificationsEnabled = JSON.parse(localStorage.getItem('notificationsEnabled')) || false;
 
+// ID del interval para recordatorios periódicos (para poder limpiarlo)
+let periodicReminderIntervalId = null;
+// Intervalo por defecto en minutos para recordatorios periódicos
+const DEFAULT_PERIODIC_MINUTES = 5;
+
 // Inicialización
 document.addEventListener('DOMContentLoaded', () => {
     checkSession();
     requestNotificationPermission();
+    // scheduleNotifications solo agenda notificaciones diarias si notificationsEnabled === true
     scheduleNotifications();
+    // Si las notificaciones están activas al cargar, inicia recordatorios periódicos
+    if (notificationsEnabled) {
+        startPeriodicReminders(DEFAULT_PERIODIC_MINUTES);
+    }
 });
 
 // Función para verificar sesión
@@ -79,7 +89,7 @@ function login() {
         showToast(`¡Bienvenido, ${user.name}!`);
         
         // Notificación de bienvenida
-        if (notificationsEnabled && 'Notification' in window) {
+        if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
             new Notification('Bienvenido de vuelta', {
                 body: `¡Hola ${user.name}! Es genial verte de nuevo.`,
                 icon: '🏠'
@@ -147,8 +157,8 @@ function updateDashboard() {
     const journalCount = currentUser.journals.length;
     
     const totalMinutes = 
-        currentUser.workouts.reduce((sum, w) => sum + w.duration, 0) +
-        currentUser.meditations.reduce((sum, m) => sum + m.duration, 0);
+        currentUser.workouts.reduce((sum, w) => sum + (w.duration || 0), 0) +
+        currentUser.meditations.reduce((sum, m) => sum + (m.duration || 0), 0);
 
     // Actualizar contadores
     document.getElementById('workoutCount').textContent = workoutCount;
@@ -162,11 +172,11 @@ function updateDashboard() {
 
     const weeklyExercise = currentUser.workouts
         .filter(w => new Date(w.date) > weekAgo)
-        .reduce((sum, w) => sum + w.duration, 0);
+        .reduce((sum, w) => sum + (w.duration || 0), 0);
 
     const weeklyMeditation = currentUser.meditations
         .filter(m => new Date(m.date) > weekAgo)
-        .reduce((sum, m) => sum + m.duration, 0);
+        .reduce((sum, m) => sum + (m.duration || 0), 0);
 
     document.getElementById('weeklyExercise').textContent = `${weeklyExercise} min`;
     document.getElementById('weeklyMeditation').textContent = `${weeklyMeditation} min`;
@@ -232,7 +242,7 @@ function startExercise(name, duration, reps, sets) {
         showToast(`¡Excelente! ${name} completado`);
         
         // Notificación
-        if (notificationsEnabled && 'Notification' in window) {
+        if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
             new Notification('¡Entrenamiento completado!', {
                 body: `Has completado ${name}. ¡Sigue así!`,
                 icon: '🏋️'
@@ -259,7 +269,7 @@ function startMeditation(name, duration, type) {
         showToast(`Meditación ${name} completada`);
         
         // Notificación
-        if (notificationsEnabled && 'Notification' in window) {
+        if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
             new Notification('Meditación completada', {
                 body: `Has completado ${name}. Tu mente lo agradece.`,
                 icon: '🧘'
@@ -290,7 +300,7 @@ function saveMood(mood, emoji) {
     showToast('Estado de ánimo registrado');
     
     // Notificación
-    if (notificationsEnabled && 'Notification' in window) {
+    if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
         new Notification('Ánimo registrado', {
             body: `Has registrado: ${mood}`,
             icon: emoji
@@ -302,7 +312,7 @@ function saveMood(mood, emoji) {
 function updateMoodHistory() {
     const container = document.getElementById('moodHistory');
     
-    if (currentUser.moods.length === 0) {
+    if (!currentUser || currentUser.moods.length === 0) {
         container.innerHTML = '<p class="empty-state">No hay registros de ánimo</p>';
         return;
     }
@@ -354,7 +364,7 @@ function saveJournal() {
     showToast('Entrada de diario guardada');
     
     // Notificación
-    if (notificationsEnabled && 'Notification' in window) {
+    if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
         new Notification('Diario actualizado', {
             body: 'Has agregado una nueva entrada a tu diario.',
             icon: '📝'
@@ -366,7 +376,7 @@ function saveJournal() {
 function updateJournalEntries() {
     const container = document.getElementById('journalEntries');
     
-    if (currentUser.journals.length === 0) {
+    if (!currentUser || currentUser.journals.length === 0) {
         container.innerHTML = '<p class="empty-state">No hay entradas de diario</p>';
         return;
     }
@@ -412,6 +422,23 @@ function formatDate(date) {
 // Mostrar toast
 function showToast(message) {
     const toast = document.getElementById('toast');
+    if (!toast) {
+        // Si no existe el toast en el DOM, crea uno temporal
+        const temp = document.createElement('div');
+        temp.textContent = message;
+        temp.style.position = 'fixed';
+        temp.style.top = '20px';
+        temp.style.left = '50%';
+        temp.style.transform = 'translateX(-50%)';
+        temp.style.background = '#4ade80';
+        temp.style.color = '#000';
+        temp.style.padding = '12px 18px';
+        temp.style.borderRadius = '12px';
+        temp.style.zIndex = 9999;
+        document.body.appendChild(temp);
+        setTimeout(() => temp.remove(), 3000);
+        return;
+    }
     toast.textContent = message;
     toast.classList.add('show');
     
@@ -431,14 +458,25 @@ function saveUsers() {
 
 // Solicitar permiso para notificaciones
 function requestNotificationPermission() {
-    if ('Notification' in window && Notification.permission === 'default') {
+    if (!('Notification' in window)) return;
+
+    if (Notification.permission === 'default') {
         Notification.requestPermission().then(permission => {
             if (permission === 'granted') {
                 notificationsEnabled = true;
                 localStorage.setItem('notificationsEnabled', JSON.stringify(true));
                 showToast('Notificaciones activadas');
+                // Si activamos permiso, iniciamos recordatorios periódicos
+                startPeriodicReminders(DEFAULT_PERIODIC_MINUTES);
+            } else if (permission === 'denied') {
+                notificationsEnabled = false;
+                localStorage.setItem('notificationsEnabled', JSON.stringify(false));
+                showToast('Notificaciones bloqueadas en el navegador');
             }
         });
+    } else if (Notification.permission === 'granted') {
+        // Ya había sido concedido; respetar el valor almacenado en notificationsEnabled
+        if (notificationsEnabled) startPeriodicReminders(DEFAULT_PERIODIC_MINUTES);
     }
 }
 
@@ -453,16 +491,26 @@ function toggleNotifications() {
         notificationsEnabled = !notificationsEnabled;
         localStorage.setItem('notificationsEnabled', JSON.stringify(notificationsEnabled));
         showToast(notificationsEnabled ? 'Notificaciones activadas' : 'Notificaciones desactivadas');
+
+        if (notificationsEnabled) {
+            // Iniciar recordatorios periódicos y programar notificaciones diarias
+            startPeriodicReminders(DEFAULT_PERIODIC_MINUTES);
+            scheduleNotifications();
+        } else {
+            // Parar recordatorios periódicos
+            stopPeriodicReminders();
+        }
     } else if (Notification.permission === 'default') {
+        // Pedir permiso y al conceder, activamos
         requestNotificationPermission();
     } else {
         showToast('Debes permitir notificaciones en la configuración del navegador');
     }
 }
-
-// Programar notificaciones diarias
+// Programar notificaciones diarias (mantengo tu lógica original)
 function scheduleNotifications() {
     if (!notificationsEnabled || !('Notification' in window)) return;
+
 
     // Notificación de ejercicio matutino (9:00 AM)
     scheduleNotification('¡Buenos días!', 'Es hora de tu ejercicio matutino 🏋️', 9, 0);
@@ -476,6 +524,8 @@ function scheduleNotifications() {
 
 // Programar una notificación específica
 function scheduleNotification(title, body, hour, minute) {
+    if (!notificationsEnabled || Notification.permission !== 'granted') return;
+
     const now = new Date();
     const scheduledTime = new Date();
     scheduledTime.setHours(hour, minute, 0, 0);
@@ -495,9 +545,57 @@ function scheduleNotification(title, body, hour, minute) {
             });
         }
         
-        // Reprogramar para el día siguiente
+        // Reprogramar para el día siguiente (si siguen activadas)
         scheduleNotification(title, body, hour, minute);
     }, timeUntilNotification);
+}
+
+// -- NUEVAS FUNCIONES: RECORDATORIOS PERIÓDICOS (cada X minutos) --
+
+// Inicia recordatorios periódicos cada 'minutes' minutos (no crea varios intervals)
+function startPeriodicReminders(minutes = DEFAULT_PERIODIC_MINUTES) {
+    // Si ya existe un interval, no crear otro
+    if (periodicReminderIntervalId) return;
+
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+    // Enviar un recordatorio inmediato (opcional — ayuda a probar)
+    sendRandomReminder();
+
+    // Programar repetición
+    periodicReminderIntervalId = setInterval(() => {
+        if (notificationsEnabled && Notification.permission === 'granted') {
+            sendRandomReminder();
+        }
+    }, minutes * 60 * 1000);
+}
+
+// Detiene recordatorios periódicos
+function stopPeriodicReminders() {
+    if (periodicReminderIntervalId) {
+        clearInterval(periodicReminderIntervalId);
+        periodicReminderIntervalId = null;
+    }
+}
+
+// Enviar recordatorio aleatorio (mensajes tipo medita / mueve / hidrata)
+function sendRandomReminder() {
+    const messages = [
+        { title: "Momento de Meditar 🧘", msg: "Respira profundo 2 minutos para relajarte." },
+        { title: "Hora de Moverse 🏋️", msg: "Haz un estiramiento rápido de 1–2 minutos." },
+        { title: "Hidrátate 💧", msg: "Toma un vaso de agua ahora." },
+        { title: "Chequeo Rápido 😊", msg: "¿Cómo te sientes? Registra tu ánimo en la app." },
+        { title: "Descanso Mental 😌", msg: "Cierra los ojos y descansa 60 segundos." }
+    ];
+
+    const random = messages[Math.floor(Math.random() * messages.length)];
+
+    if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification(random.title, {
+            body: random.msg,
+            icon: '🔔'
+        });
+    }
 }
 
 // Cerrar modales al hacer clic fuera
