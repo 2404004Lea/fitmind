@@ -562,5 +562,34 @@ if ("serviceWorker" in navigator) {
         .then(() => console.log("Service Worker registrado"))
         .catch(err => console.log("Error al registrar SW:", err));
 }
+async function programarNotificacionCadaHora() {
+    const registration = await navigator.serviceWorker.ready;
+
+    // iPhone y navegadores compatibles con notificaciones programadas
+    if ("showTrigger" in Notification.prototype) {
+
+        const titulo = "FitMind";
+        const mensaje = "✨ Momento para tu bienestar — tómate un minuto para ti";
+
+        registration.showNotification(titulo, {
+            body: mensaje,
+            showTrigger: new TimestampTrigger(Date.now() + 60 * 60 * 1000), // 1 hora
+            vibrate: [200, 100, 200],
+            icon: "icon-192.png"
+        });
+
+        console.log("Notificación programada en 1 hora");
+    } else {
+        console.log("El dispositivo NO soporta notificaciones programadas.");
+    }
+}
+if ("Notification" in window) {
+    Notification.requestPermission().then(permiso => {
+        if (permiso === "granted") {
+            programarNotificacionCadaHora();
+        }
+    });
+}
 // Función para debugging (puede ser llamada desde la consola)
+
 window.createSampleData = createSampleData;
